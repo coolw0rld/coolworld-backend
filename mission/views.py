@@ -8,6 +8,8 @@ from django.utils import timezone
 import json, base64
 from django.core.files.base import ContentFile
 import unicodedata
+import requests
+
 
 @csrf_exempt
 def create(request):
@@ -19,19 +21,20 @@ def create(request):
             if not survey_answers:
                 return JsonResponse({"error": "No survey answers provided"}, status=400)
 
-            # survey_answers의 원소를 각 변수에 저장 (traffic, diet, recycle ...)
-            # 설문 내용 확정 후 수정 예정
-            ans1 = survey_answers[0] if len(survey_answers) > 0 else None
-            ans2 = survey_answers[1] if len(survey_answers) > 1 else None
-            print(ans1, ans2)
-
 
             mission = Mission()
             
             # ----- AI 미션 생성 ----- #
-            # 임시 코드
-            mission_content = "종이컵 대신 텀블러를 사용해보세요."
-            mission_category = "일회용품"
+            # mission_content = "종이컵 대신 텀블러를 사용해보세요."
+            # mission_category = "일회용품"
+
+            API_ADDRESS = "http://127.0.0.1:8080"  
+            response = requests.post(f"{API_ADDRESS}/mission_create", json={"answer":survey_answers}).json()
+            
+            mission_content = response.get("content")
+            mission_category = response.get("category")
+        
+
             # ----- AI 미션 생성 ----- #
 
             mission.content = mission_content
@@ -66,27 +69,43 @@ def verify(request):
             if not mission_date or not proof_image:
                 return JsonResponse({"error": "Date and image are required"}, status=400)
 
-            proof_image = json.dumps(str(proof_image))
+            #proof_image = json.dumps(str(proof_image))
 
+            print(1)
             # 해당 날짜의 미션을 조회
             try:
                 mission = Mission.objects.get(date=mission_date)
             except Mission.DoesNotExist:
                 return JsonResponse({"error": "Mission not found for the given date"}, status=404)
             
+            mission.image = request.FILES['image']
+            mission.save()
 
+            # S3 URL로 변경 예정
+            mission_image_url = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRF1IwK6-SxM83UpFVY6WtUZxXx-phss_gAUfdKbkTfau6VWVkt"
+            #mission_image_url = request.build_absolute_uri(mission.image.url)
+
+            
             # ---- AI를 호출해 이미지 인증 여부 결정 ---- #
-            # is_successful = ai_verify_mission(proof_image)
-            # 임시
-            import random
-            is_successful = random.choice([True, False])
+            payload = {
+                "mission": mission.content,
+                "image": mission_image_url,
+            }
+
+            API_ADDRESS = "http://127.0.0.1:8080"  
+            response = requests.post(f"{API_ADDRESS}/check_clear", json=payload).json()
+
+            print("response: ", response)
+            
+
+            result = response.get("result")
+
             # ---- AI를 호출해 이미지 인증 여부 결정 ---- #
 
             # 미션 업데이트
-            mission.image = proof_image
-            mission.is_successful = is_successful
+            mission.is_successful = True if result == "success" else False
             mission.save()
-
+ 
             # 응답 데이터 생성
             response_data = {
                 "id": mission.pk,
